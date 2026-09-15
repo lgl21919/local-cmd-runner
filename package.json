@@ -1,0 +1,25 @@
+{
+  "name": "local-cmd-runner",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/local-cmd-runner.js",
+  "bin": {
+    "local-cmd-runner": "dist/local-cmd-runner.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^26.5.1",
+    "express": "^5.2.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}
