@@ -7,6 +7,7 @@
     "local-cmd-runner": "dist/local-cmd-runner.js"
   },
   "scripts": {
+    "start": "npm run build && node dist/local-cmd-runner.js",
     "build": "node scripts/build.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -14,6 +15,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^26.5.1",
     "express": "^5.2.1",
     "tsx": "^4.23.13",
