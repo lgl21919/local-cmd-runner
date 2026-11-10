@@ -1,4 +1,4 @@
-import { chmod } from "node:fs/promises";
+import { chmod, cp, mkdir } from "node:fs/promises";
 import { build } from "esbuild";
 
 const outfile = "dist/local-cmd-runner.js";
@@ -16,3 +16,5 @@ await build({
 });
 
 await chmod(outfile, 0o755);
+await mkdir("dist/public", { recursive: true });
+await cp("public", "dist/public", { recursive: true });

@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Local CMD Runner</title>
+    <style>
+      :root {
+        --bg: #10141c;
+        --panel: #171d28;
+        --line: #2a3445;
+        --text: #e8eef8;
+        --muted: #8b98ad;
+        --accent: #3dd6c6;
+        --accent-dim: #1f6f68;
+        --danger: #ff7b72;
+        --ok: #7ee787;
+        --font: "Cascadia Code", "JetBrains Mono", "Consolas", monospace;
+        --ui: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text);
+        font-family: var(--ui);
+        background:
+          radial-gradient(1200px 600px at 10% -10%, #1d3a45 0%, transparent 55%),
+          radial-gradient(900px 500px at 100% 0%, #243056 0%, transparent 45%),
+          var(--bg);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr) 320px;
+        gap: 1rem;
+        width: min(1440px, calc(100% - 2rem));
+        margin: 1.5rem auto 2.5rem;
+        align-items: start;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 1.45rem;
+        letter-spacing: 0.02em;
+      }
+
+      header p {
+        margin: 0.4rem 0 0;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .panel {
+        background: color-mix(in srgb, var(--panel) 92%, black);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 1rem;
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 1rem;
+        max-height: calc(100vh - 2rem);
+        display: flex;
+        flex-direction: column;
+        padding: 0;
+        overflow: hidden;
+      }
+
+      .sidebar-head {
+        padding: 0.9rem 1rem 0.7rem;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .sidebar-head h2 {
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      .sidebar-head p {
+        margin: 0.3rem 0 0;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .sidebar-search {
+        padding: 0.7rem 0.85rem;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .sidebar-search input {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0d1118;
+        color: var(--text);
+        font-family: var(--ui);
+        font-size: 0.85rem;
+        padding: 0.55rem 0.7rem;
+        outline: none;
+      }
+
+      .sidebar-search input:focus {
+        border-color: var(--accent-dim);
+        box-shadow: 0 0 0 3px rgba(61, 214, 198, 0.15);
+      }
+
+      .cmd-list {
+        overflow: auto;
+        padding: 0.55rem;
+        flex: 1;
+      }
+
+      .cmd-group {
+        margin-bottom: 0.75rem;
+      }
+
+      .cmd-group h3 {
+        margin: 0.2rem 0.35rem 0.4rem;
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .cmd-item,
+      .history-item {
+        display: block;
+        width: 100%;
+        text-align: left;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
+        padding: 0.45rem 0.55rem;
+        margin-bottom: 0.2rem;
+        cursor: pointer;
+      }
+
+      .cmd-item:hover,
+      .cmd-item.active,
+      .history-item:hover,
+      .history-item.active {
+        background: #121925;
+        border-color: var(--line);
+      }
+
+      .cmd-item code,
+      .history-item code {
+        display: block;
+        font-family: var(--font);
+        font-size: 0.78rem;
+        color: var(--accent);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .cmd-item span,
+      .history-item .meta-line,
+      .history-item .preview {
+        display: block;
+        margin-top: 0.15rem;
+        color: var(--muted);
+        font-size: 0.72rem;
+        line-height: 1.3;
+      }
+
+      .history-item .meta-line {
+        display: flex;
+        gap: 0.45rem;
+        flex-wrap: wrap;
+      }
+
+      .history-item .ok {
+        color: var(--ok);
+      }
+
+      .history-item .fail {
+        color: var(--danger);
+      }
+
+      .history-item .preview {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .date-folder {
+        margin: 0.15rem 0.2rem 0.45rem;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        overflow: hidden;
+        background: #121722;
+      }
+
+      .date-folder > summary {
+        list-style: none;
+        cursor: pointer;
+        padding: 0.55rem 0.7rem;
+        font-size: 0.82rem;
+        font-weight: 650;
+        color: var(--text);
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        background: #151c28;
+      }
+
+      .date-folder > summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .date-folder > summary::before {
+        content: "▸";
+        color: var(--muted);
+        margin-right: 0.35rem;
+      }
+
+      .date-folder[open] > summary::before {
+        content: "▾";
+      }
+
+      .date-folder .count {
+        color: var(--muted);
+        font-weight: 500;
+        font-size: 0.75rem;
+      }
+
+      .date-folder .folder-body {
+        padding: 0.35rem;
+        border-top: 1px solid var(--line);
+      }
+
+      .workspace header {
+        margin-bottom: 1rem;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 0.35rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .field {
+        margin-bottom: 0.9rem;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #0d1118;
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 0.95rem;
+        padding: 0.75rem 0.85rem;
+        outline: none;
+      }
+
+      input:focus,
+      textarea:focus {
+        border-color: var(--accent-dim);
+        box-shadow: 0 0 0 3px rgba(61, 214, 198, 0.15);
+      }
+
+      textarea {
+        min-height: 110px;
+        resize: vertical;
+        line-height: 1.45;
+      }
+
+      .row {
+        display: flex;
+        gap: 0.75rem;
+        align-items: end;
+        flex-wrap: wrap;
+      }
+
+      .row .grow {
+        flex: 1 1 220px;
+      }
+
+      .actions {
+        display: flex;
+        gap: 0.6rem;
+        margin-top: 0.2rem;
+      }
+
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 0.7rem 1.1rem;
+        font: 600 0.92rem var(--ui);
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: linear-gradient(180deg, #4ce3d3, #2bb8a9);
+        color: #062823;
+      }
+
+      button.ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px solid var(--line);
+      }
+
+      button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+
+      .meta {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin: 1rem 0 0.5rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
+      .meta strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .meta .ok {
+        color: var(--ok);
+      }
+
+      .meta .fail {
+        color: var(--danger);
+      }
+
+      pre {
+        margin: 0;
+        min-height: 240px;
+        max-height: 48vh;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #0a0e14;
+        color: #d5deea;
+        font-family: var(--font);
+        font-size: 0.88rem;
+        line-height: 1.45;
+        padding: 0.9rem 1rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .hint {
+        margin-top: 0.75rem;
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
+      @media (max-width: 1100px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          position: static;
+          max-height: 320px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="panel sidebar">
+        <div class="sidebar-head">
+          <h2>Git 命令参考</h2>
+          <p>点击填入中间命令框，可再编辑后运行</p>
+        </div>
+        <div class="sidebar-search">
+          <input id="git-filter" type="search" placeholder="搜索命令…" autocomplete="off" />
+        </div>
+        <div class="cmd-list" id="git-cmd-list"></div>
+      </aside>
+
+      <main class="workspace">
+        <header>
+          <h1>Local CMD Runner</h1>
+          <p>在本地执行命令，输出显示在下方。仅监听本机，请勿暴露到公网。</p>
+        </header>
+
+        <section class="panel">
+          <form id="run-form">
+            <div class="field">
+              <label for="command">命令</label>
+              <textarea
+                id="command"
+                name="command"
+                placeholder="例如：git status&#10;或从左侧点击 Git 命令 / 右侧点击历史自动填入"
+                required
+              ></textarea>
+            </div>
+
+            <div class="row">
+              <div class="field grow">
+                <label for="cwd">工作目录（可选）</label>
+                <input
+                  id="cwd"
+                  name="cwd"
+                  placeholder="留空则使用服务默认目录"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="actions">
+                <button class="primary" type="submit" id="run-btn">运行</button>
+                <button class="ghost" type="button" id="clear-btn">清空输出</button>
+              </div>
+            </div>
+          </form>
+
+          <div class="meta">
+            <div>状态：<strong id="status">待命</strong></div>
+            <div>退出码：<strong id="exit-code">-</strong></div>
+            <div>耗时：<strong id="duration">-</strong></div>
+          </div>
+
+          <pre id="output">等待执行命令…</pre>
+          <p class="hint">快捷键：Ctrl/Cmd + Enter 运行。历史按执行日期存到 history/YYYY-MM-DD/。</p>
+        </section>
+      </main>
+
+      <aside class="panel sidebar">
+        <div class="sidebar-head">
+          <h2>执行历史</h2>
+          <p>按日期文件夹归档，点击回填命令与输出</p>
+        </div>
+        <div class="sidebar-search">
+          <input id="history-filter" type="search" placeholder="搜索历史…" autocomplete="off" />
+        </div>
+        <div class="cmd-list" id="history-list"></div>
+      </aside>
+    </div>
+
+    <script>
+      const GIT_COMMANDS = [
+        {
+          group: "配置",
+          items: [
+            { cmd: "git config --list", desc: "查看所有配置" },
+            { cmd: "git config --global user.name \"Your Name\"", desc: "设置全局用户名" },
+            { cmd: "git config --global user.email \"you@example.com\"", desc: "设置全局邮箱" },
+            { cmd: "git config --global core.editor notepad", desc: "设置默认编辑器" },
+            { cmd: "git config --global init.defaultBranch main", desc: "默认主分支为 main" },
+            { cmd: "git config --global alias.st status", desc: "创建别名 st=status" },
+          ],
+        },
+        {
+          group: "创建与克隆",
+          items: [
+            { cmd: "git init", desc: "初始化仓库" },
+            { cmd: "git clone <url>", desc: "克隆远程仓库" },
+            { cmd: "git clone --depth 1 <url>", desc: "浅克隆（只要最近一次提交）" },
+            { cmd: "git clone -b <branch> <url>", desc: "克隆并检出指定分支" },
+          ],
+        },
+        {
+          group: "状态与差异",
+          items: [
+            { cmd: "git status", desc: "查看工作区状态" },
+            { cmd: "git status -sb", desc: "简洁状态" },
+            { cmd: "git diff", desc: "未暂存改动" },
+            { cmd: "git diff --staged", desc: "已暂存改动" },
+            { cmd: "git diff HEAD", desc: "相对 HEAD 的全部改动" },
+            { cmd: "git diff <branch>", desc: "与某分支对比" },
+            { cmd: "git show", desc: "显示最近一次提交" },
+            { cmd: "git show <commit>", desc: "显示指定提交" },
+          ],
+        },
+        {
+          group: "暂存与提交",
+          items: [
+            { cmd: "git add .", desc: "暂存全部改动" },
+            { cmd: "git add <file>", desc: "暂存指定文件" },
+            { cmd: "git add -p", desc: "交互式挑选改动块" },
+            { cmd: "git restore --staged <file>", desc: "取消暂存" },
+            { cmd: "git restore <file>", desc: "丢弃工作区改动" },
+            { cmd: "git commit -m \"message\"", desc: "提交" },
+            { cmd: "git commit -am \"message\"", desc: "暂存已跟踪文件并提交" },
+            { cmd: "git commit --amend --no-edit", desc: "修正最近提交（保留说明）" },
+            { cmd: "git commit --amend -m \"message\"", desc: "修正最近提交说明" },
+          ],
+        },
+        {
+          group: "历史与日志",
+          items: [
+            { cmd: "git log", desc: "提交历史" },
+            { cmd: "git log --oneline --graph --decorate -20", desc: "图文简洁日志" },
+            { cmd: "git log --stat", desc: "带文件统计的日志" },
+            { cmd: "git log -p", desc: "带补丁的日志" },
+            { cmd: "git log --author=\"name\"", desc: "按作者过滤" },
+            { cmd: "git log --since=\"2 weeks ago\"", desc: "按时间过滤" },
+            { cmd: "git blame <file>", desc: "逐行查看作者" },
+            { cmd: "git shortlog -sn", desc: "贡献次数统计" },
+          ],
+        },
+        {
+          group: "分支",
+          items: [
+            { cmd: "git branch", desc: "列出本地分支" },
+            { cmd: "git branch -a", desc: "列出本地与远程分支" },
+            { cmd: "git branch -v", desc: "分支及最近提交" },
+            { cmd: "git branch <name>", desc: "创建分支" },
+            { cmd: "git switch <name>", desc: "切换分支" },
+            { cmd: "git switch -c <name>", desc: "创建并切换分支" },
+            { cmd: "git checkout <name>", desc: "切换分支（旧写法）" },
+            { cmd: "git checkout -b <name>", desc: "创建并切换（旧写法）" },
+            { cmd: "git branch -d <name>", desc: "删除已合并分支" },
+            { cmd: "git branch -D <name>", desc: "强制删除分支" },
+            { cmd: "git branch -m <old> <new>", desc: "重命名分支" },
+            { cmd: "git branch -u origin/<name>", desc: "设置上游跟踪分支" },
+          ],
+        },
+        {
+          group: "合并与变基",
+          items: [
+            { cmd: "git merge <branch>", desc: "合并分支" },
+            { cmd: "git merge --no-ff <branch>", desc: "保留合并提交" },
+            { cmd: "git merge --abort", desc: "中止合并" },
+            { cmd: "git rebase <branch>", desc: "变基到目标分支" },
+            { cmd: "git rebase -i HEAD~3", desc: "交互式整理最近 3 次提交" },
+            { cmd: "git rebase --continue", desc: "解决冲突后继续变基" },
+            { cmd: "git rebase --abort", desc: "中止变基" },
+            { cmd: "git cherry-pick <commit>", desc: "拣选单个提交" },
+          ],
+        },
+        {
+          group: "远程",
+          items: [
+            { cmd: "git remote -v", desc: "查看远程仓库" },
+            { cmd: "git remote add origin <url>", desc: "添加 origin" },
+            { cmd: "git remote set-url origin <url>", desc: "修改 origin 地址" },
+            { cmd: "git remote remove origin", desc: "删除 origin" },
+            { cmd: "git fetch", desc: "拉取远程更新（不合并）" },
+            { cmd: "git fetch --all --prune", desc: "拉取全部并清理失效引用" },
+            { cmd: "git pull", desc: "拉取并合并" },
+            { cmd: "git pull --rebase", desc: "拉取并以变基方式整合" },
+            { cmd: "git push", desc: "推送当前分支" },
+            { cmd: "git push -u origin <branch>", desc: "推送并设置上游" },
+            { cmd: "git push origin --delete <branch>", desc: "删除远程分支" },
+            { cmd: "git push --tags", desc: "推送标签" },
+          ],
+        },
+        {
+          group: "暂存区 Stash",
+          items: [
+            { cmd: "git stash", desc: "暂存当前改动" },
+            { cmd: "git stash push -m \"message\"", desc: "带说明地 stash" },
+            { cmd: "git stash -u", desc: "包含未跟踪文件" },
+            { cmd: "git stash list", desc: "查看 stash 列表" },
+            { cmd: "git stash show -p", desc: "查看最近 stash 内容" },
+            { cmd: "git stash pop", desc: "应用并删除最近 stash" },
+            { cmd: "git stash apply", desc: "应用但保留 stash" },
+            { cmd: "git stash drop", desc: "删除最近 stash" },
+            { cmd: "git stash clear", desc: "清空全部 stash" },
+          ],
+        },
+        {
+          group: "标签",
+          items: [
+            { cmd: "git tag", desc: "列出标签" },
+            { cmd: "git tag <name>", desc: "创建轻量标签" },
+            { cmd: "git tag -a <name> -m \"message\"", desc: "创建附注标签" },
+            { cmd: "git tag -d <name>", desc: "删除本地标签" },
+            { cmd: "git push origin <name>", desc: "推送单个标签" },
+            { cmd: "git push origin --delete tag <name>", desc: "删除远程标签" },
+          ],
+        },
+        {
+          group: "撤销与清理",
+          items: [
+            { cmd: "git reset HEAD~1", desc: "撤销最近提交（保留改动）" },
+            { cmd: "git reset --soft HEAD~1", desc: "撤销提交，改动仍暂存" },
+            { cmd: "git reset --hard HEAD", desc: "丢弃所有未提交改动" },
+            { cmd: "git reset --hard HEAD~1", desc: "硬回退一个提交" },
+            { cmd: "git revert <commit>", desc: "用新提交抵消某次提交" },
+            { cmd: "git clean -fd", desc: "删除未跟踪文件/目录" },
+            { cmd: "git clean -fdn", desc: "预览将删除的未跟踪内容" },
+          ],
+        },
+        {
+          group: "查阅与调试",
+          items: [
+            { cmd: "git help <command>", desc: "查看某命令帮助" },
+            { cmd: "git version", desc: "查看 Git 版本" },
+            { cmd: "git rev-parse --show-toplevel", desc: "仓库根目录" },
+            { cmd: "git rev-parse HEAD", desc: "当前提交哈希" },
+            { cmd: "git ls-files", desc: "列出已跟踪文件" },
+            { cmd: "git ls-remote --heads origin", desc: "查看远程分支" },
+            { cmd: "git reflog", desc: "查看引用操作历史" },
+            { cmd: "git bisect start", desc: "开始二分查找" },
+          ],
+        },
+        {
+          group: "子模块",
+          items: [
+            { cmd: "git submodule add <url> <path>", desc: "添加子模块" },
+            { cmd: "git submodule update --init --recursive", desc: "初始化并更新子模块" },
+            { cmd: "git submodule status", desc: "子模块状态" },
+          ],
+        },
+      ];
+
+      const form = document.getElementById("run-form");
+      const commandEl = document.getElementById("command");
+      const cwdEl = document.getElementById("cwd");
+      const runBtn = document.getElementById("run-btn");
+      const clearBtn = document.getElementById("clear-btn");
+      const outputEl = document.getElementById("output");
+      const statusEl = document.getElementById("status");
+      const exitCodeEl = document.getElementById("exit-code");
+      const durationEl = document.getElementById("duration");
+      const gitListEl = document.getElementById("git-cmd-list");
+      const gitFilterEl = document.getElementById("git-filter");
+      const historyListEl = document.getElementById("history-list");
+      const historyFilterEl = document.getElementById("history-filter");
+
+      let activeCmdBtn = null;
+      let activeHistoryBtn = null;
+      let historyTimer = null;
+
+      function formatTime(iso) {
+        try {
+          return new Date(iso).toLocaleTimeString("zh-CN", { hour12: false });
+        } catch {
+          return iso;
+        }
+      }
+
+      function fillCommand(cmd, button) {
+        commandEl.value = cmd;
+        commandEl.focus();
+        commandEl.setSelectionRange(cmd.length, cmd.length);
+
+        if (activeCmdBtn) {
+          activeCmdBtn.classList.remove("active");
+        }
+        if (button) {
+          button.classList.add("active");
+          activeCmdBtn = button;
+        }
+      }
+
+      function showResult(data) {
+        const ok = data.exitCode === 0 && !data.error;
+        statusEl.textContent = data.error
+          ? "失败"
+          : ok
+            ? "成功"
+            : "结束（非零退出码）";
+        statusEl.className = ok ? "ok" : "fail";
+        exitCodeEl.textContent = String(data.exitCode ?? "-");
+        durationEl.textContent =
+          data.durationMs !== undefined ? `${data.durationMs} ms` : "-";
+
+        if (data.error && !data.stdout && !data.stderr) {
+          outputEl.textContent = data.error;
+          return;
+        }
+
+        const chunks = [];
+        if (data.stdout) chunks.push(data.stdout);
+        if (data.stderr) {
+          if (chunks.length) chunks.push("\n--- stderr ---\n");
+          chunks.push(data.stderr);
+        }
+        if (data.error) {
+          if (chunks.length) chunks.push("\n--- error ---\n");
+          chunks.push(data.error);
+        }
+        if (!chunks.length) chunks.push("(无输出)");
+        outputEl.textContent = chunks.join("");
+      }
+
+      function renderGitCommands(filterText = "") {
+        const q = filterText.trim().toLowerCase();
+        gitListEl.innerHTML = "";
+
+        let shown = 0;
+        for (const group of GIT_COMMANDS) {
+          const items = group.items.filter((item) => {
+            if (!q) return true;
+            return (
+              item.cmd.toLowerCase().includes(q) ||
+              item.desc.toLowerCase().includes(q) ||
+              group.group.toLowerCase().includes(q)
+            );
+          });
+          if (!items.length) continue;
+
+          const section = document.createElement("section");
+          section.className = "cmd-group";
+
+          const title = document.createElement("h3");
+          title.textContent = group.group;
+          section.appendChild(title);
+
+          for (const item of items) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "cmd-item";
+            btn.title = item.cmd;
+            btn.innerHTML = `<code></code><span></span>`;
+            btn.querySelector("code").textContent = item.cmd;
+            btn.querySelector("span").textContent = item.desc;
+            btn.addEventListener("click", () => fillCommand(item.cmd, btn));
+            section.appendChild(btn);
+            shown += 1;
+          }
+
+          gitListEl.appendChild(section);
+        }
+
+        if (!shown) {
+          const empty = document.createElement("p");
+          empty.className = "hint";
+          empty.style.padding = "0.5rem";
+          empty.textContent = "没有匹配的命令";
+          gitListEl.appendChild(empty);
+        }
+      }
+
+      async function openHistoryEntry(date, id, button) {
+        try {
+          const res = await fetch(`/api/history/${encodeURIComponent(date)}/${encodeURIComponent(id)}`);
+          const data = await res.json();
+          if (!res.ok) {
+            statusEl.textContent = "失败";
+            statusEl.className = "fail";
+            outputEl.textContent = data.error || "读取历史失败";
+            return;
+          }
+
+          commandEl.value = data.command || "";
+          cwdEl.value = data.cwd || "";
+          showResult(data);
+
+          if (activeHistoryBtn) activeHistoryBtn.classList.remove("active");
+          if (button) {
+            button.classList.add("active");
+            activeHistoryBtn = button;
+          }
+          commandEl.focus();
+        } catch (error) {
+          statusEl.textContent = "失败";
+          statusEl.className = "fail";
+          outputEl.textContent = error instanceof Error ? error.message : String(error);
+        }
+      }
+
+      function renderHistory(groups) {
+        historyListEl.innerHTML = "";
+
+        if (!groups.length) {
+          const empty = document.createElement("p");
+          empty.className = "hint";
+          empty.style.padding = "0.5rem";
+          empty.textContent = "暂无历史，运行命令后会出现在这里";
+          historyListEl.appendChild(empty);
+          return;
+        }
+
+        groups.forEach((group, index) => {
+          const details = document.createElement("details");
+          details.className = "date-folder";
+          details.open = index === 0;
+
+          const summary = document.createElement("summary");
+          summary.innerHTML = `<span></span><span class="count"></span>`;
+          summary.querySelector("span").textContent = `📁 ${group.date}`;
+          summary.querySelector(".count").textContent = `${group.entries.length} 条`;
+          details.appendChild(summary);
+
+          const body = document.createElement("div");
+          body.className = "folder-body";
+
+          for (const item of group.entries) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "history-item";
+            btn.title = item.command;
+
+            const ok = item.exitCode === 0 && !item.error;
+            btn.innerHTML = `
+              <code></code>
+              <span class="meta-line">
+                <span class="time"></span>
+                <span class="status"></span>
+                <span class="dur"></span>
+              </span>
+              <span class="preview"></span>
+            `;
+            btn.querySelector("code").textContent = item.command;
+            btn.querySelector(".time").textContent = formatTime(item.executedAt);
+            const statusNode = btn.querySelector(".status");
+            statusNode.textContent = ok ? `exit ${item.exitCode}` : `exit ${item.exitCode}`;
+            statusNode.className = `status ${ok ? "ok" : "fail"}`;
+            btn.querySelector(".dur").textContent = `${item.durationMs}ms`;
+            btn.querySelector(".preview").textContent = item.preview || "";
+            btn.addEventListener("click", () => openHistoryEntry(item.date, item.id, btn));
+            body.appendChild(btn);
+          }
+
+          details.appendChild(body);
+          historyListEl.appendChild(details);
+        });
+      }
+
+      async function loadHistory(query = "") {
+        try {
+          const url = query.trim()
+            ? `/api/history?q=${encodeURIComponent(query.trim())}`
+            : "/api/history";
+          const res = await fetch(url);
+          const data = await res.json();
+          if (!res.ok) {
+            historyListEl.innerHTML = `<p class="hint" style="padding:0.5rem">${data.error || "加载历史失败"}</p>`;
+            return;
+          }
+          renderHistory(data.groups || []);
+        } catch (error) {
+          historyListEl.innerHTML = `<p class="hint" style="padding:0.5rem">${
+            error instanceof Error ? error.message : String(error)
+          }</p>`;
+        }
+      }
+
+      function setRunning(running) {
+        runBtn.disabled = running;
+        statusEl.textContent = running ? "执行中…" : "待命";
+      }
+
+      async function runCommand() {
+        const command = commandEl.value.trim();
+        if (!command) {
+          commandEl.focus();
+          return;
+        }
+
+        setRunning(true);
+        statusEl.textContent = "执行中…";
+        statusEl.className = "";
+        exitCodeEl.textContent = "-";
+        durationEl.textContent = "-";
+        outputEl.textContent = "执行中…\n";
+
+        try {
+          const res = await fetch("/api/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              command,
+              cwd: cwdEl.value.trim() || undefined,
+            }),
+          });
+
+          const data = await res.json();
+          if (!res.ok) {
+            statusEl.textContent = "失败";
+            statusEl.className = "fail";
+            outputEl.textContent = data.error || "请求失败";
+            await loadHistory(historyFilterEl.value);
+            return;
+          }
+
+          showResult(data);
+          await loadHistory(historyFilterEl.value);
+        } catch (error) {
+          statusEl.textContent = "失败";
+          statusEl.className = "fail";
+          outputEl.textContent = error instanceof Error ? error.message : String(error);
+        } finally {
+          runBtn.disabled = false;
+        }
+      }
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        runCommand();
+      });
+
+      commandEl.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+          runCommand();
+        }
+      });
+
+      clearBtn.addEventListener("click", () => {
+        outputEl.textContent = "等待执行命令…";
+        statusEl.textContent = "待命";
+        statusEl.className = "";
+        exitCodeEl.textContent = "-";
+        durationEl.textContent = "-";
+      });
+
+      gitFilterEl.addEventListener("input", () => {
+        renderGitCommands(gitFilterEl.value);
+      });
+
+      historyFilterEl.addEventListener("input", () => {
+        clearTimeout(historyTimer);
+        historyTimer = setTimeout(() => {
+          loadHistory(historyFilterEl.value);
+        }, 200);
+      });
+
+      renderGitCommands();
+      loadHistory();
+      commandEl.focus();
+    </script>
+  </body>
+</html>
