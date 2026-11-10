@@ -290,6 +290,88 @@
         flex: 1 1 220px;
       }
 
+      .cwd-combo {
+        position: relative;
+      }
+
+      .cwd-combo-input {
+        display: flex;
+        gap: 0.35rem;
+        align-items: stretch;
+      }
+
+      .cwd-combo-input input {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .cwd-toggle {
+        flex: 0 0 auto;
+        min-width: 2.4rem;
+        padding: 0 0.7rem;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #0d1118;
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+
+      .cwd-toggle:hover,
+      .cwd-toggle[aria-expanded="true"] {
+        color: var(--text);
+        border-color: var(--accent-dim);
+      }
+
+      .cwd-menu {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: calc(100% + 0.35rem);
+        z-index: 20;
+        margin: 0;
+        padding: 0.35rem;
+        list-style: none;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #0d1118;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+        max-height: 240px;
+        overflow: auto;
+        display: none;
+      }
+
+      .cwd-menu.open {
+        display: block;
+      }
+
+      .cwd-menu li button {
+        width: 100%;
+        text-align: left;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
+        font: 0.82rem/1.35 var(--font);
+        padding: 0.55rem 0.65rem;
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .cwd-menu li button:hover,
+      .cwd-menu li button.active {
+        background: #121925;
+        border-color: var(--line);
+        color: var(--accent);
+      }
+
+      .cwd-menu .empty {
+        padding: 0.65rem;
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
       .actions {
         display: flex;
         gap: 0.6rem;
@@ -411,12 +493,32 @@
             <div class="row">
               <div class="field grow">
                 <label for="cwd">工作目录（可选）</label>
-                <input
-                  id="cwd"
-                  name="cwd"
-                  placeholder="留空则使用服务默认目录"
-                  autocomplete="off"
-                />
+                <div class="cwd-combo" id="cwd-combo">
+                  <div class="cwd-combo-input">
+                    <input
+                      id="cwd"
+                      name="cwd"
+                      placeholder="输入路径，或下拉选择最近目录"
+                      autocomplete="off"
+                      spellcheck="false"
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded="false"
+                      aria-controls="cwd-menu"
+                    />
+                    <button
+                      class="cwd-toggle"
+                      type="button"
+                      id="cwd-toggle"
+                      aria-label="打开最近目录列表"
+                      aria-expanded="false"
+                      aria-controls="cwd-menu"
+                    >
+                      ▼
+                    </button>
+                  </div>
+                  <ul class="cwd-menu" id="cwd-menu" role="listbox"></ul>
+                </div>
               </div>
               <div class="actions">
                 <button class="primary" type="submit" id="run-btn">运行</button>
@@ -620,6 +722,8 @@
       const form = document.getElementById("run-form");
       const commandEl = document.getElementById("command");
       const cwdEl = document.getElementById("cwd");
+      const cwdToggleEl = document.getElementById("cwd-toggle");
+      const cwdMenuEl = document.getElementById("cwd-menu");
       const runBtn = document.getElementById("run-btn");
       const clearBtn = document.getElementById("clear-btn");
       const outputEl = document.getElementById("output");
@@ -634,12 +738,102 @@
       let activeCmdBtn = null;
       let activeHistoryBtn = null;
       let historyTimer = null;
+      let recentCwds = [];
+      let cwdMenuOpen = false;
+      let cwdHighlight = -1;
 
       function formatTime(iso) {
         try {
           return new Date(iso).toLocaleTimeString("zh-CN", { hour12: false });
         } catch {
           return iso;
+        }
+      }
+
+      function setCwdMenuOpen(open) {
+        cwdMenuOpen = open;
+        cwdMenuEl.classList.toggle("open", open);
+        cwdEl.setAttribute("aria-expanded", open ? "true" : "false");
+        cwdToggleEl.setAttribute("aria-expanded", open ? "true" : "false");
+        if (!open) {
+          cwdHighlight = -1;
+        }
+      }
+
+      function filteredRecentCwds() {
+        const q = cwdEl.value.trim().toLowerCase();
+        if (!q) return recentCwds;
+        return recentCwds.filter((item) => item.toLowerCase().includes(q));
+      }
+
+      function renderCwdMenu(options = filteredRecentCwds()) {
+        cwdMenuEl.innerHTML = "";
+        if (!options.length) {
+          const empty = document.createElement("div");
+          empty.className = "empty";
+          empty.textContent = recentCwds.length
+            ? "没有匹配的最近目录"
+            : "暂无最近目录，执行命令后会出现在这里";
+          cwdMenuEl.appendChild(empty);
+          return;
+        }
+
+        options.forEach((cwd, index) => {
+          const li = document.createElement("li");
+          li.setAttribute("role", "presentation");
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.setAttribute("role", "option");
+          btn.textContent = cwd;
+          btn.title = cwd;
+          if (index === cwdHighlight) {
+            btn.classList.add("active");
+          }
+          btn.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            selectCwd(cwd);
+          });
+          li.appendChild(btn);
+          cwdMenuEl.appendChild(li);
+        });
+      }
+
+      function selectCwd(cwd) {
+        cwdEl.value = cwd;
+        setCwdMenuOpen(false);
+        cwdEl.focus();
+        cwdEl.setSelectionRange(cwd.length, cwd.length);
+      }
+
+      function openCwdMenu(forceAll = false) {
+        const options = forceAll ? recentCwds : filteredRecentCwds();
+        cwdHighlight = options.length ? 0 : -1;
+        renderCwdMenu(options);
+        setCwdMenuOpen(true);
+      }
+
+      async function loadRecentCwds(nextList) {
+        if (Array.isArray(nextList)) {
+          recentCwds = nextList.slice(0, 10);
+          if (cwdMenuOpen) {
+            renderCwdMenu();
+          }
+          return;
+        }
+
+        try {
+          const res = await fetch("/api/recent-cwds");
+          const data = await res.json();
+          if (!res.ok) return;
+          recentCwds = Array.isArray(data.cwds) ? data.cwds.slice(0, 10) : [];
+          if (!cwdEl.value && data.defaultCwd) {
+            cwdEl.placeholder = `留空则使用：${data.defaultCwd}`;
+          }
+          if (cwdMenuOpen) {
+            renderCwdMenu();
+          }
+        } catch {
+          // ignore load failures; typing still works
         }
       }
 
@@ -875,11 +1069,13 @@
             statusEl.textContent = "失败";
             statusEl.className = "fail";
             outputEl.textContent = data.error || "请求失败";
+            await loadRecentCwds(data.recentCwds);
             await loadHistory(historyFilterEl.value);
             return;
           }
 
           showResult(data);
+          await loadRecentCwds(data.recentCwds);
           await loadHistory(historyFilterEl.value);
         } catch (error) {
           statusEl.textContent = "失败";
@@ -892,6 +1088,7 @@
 
       form.addEventListener("submit", (event) => {
         event.preventDefault();
+        setCwdMenuOpen(false);
         runCommand();
       });
 
@@ -899,6 +1096,64 @@
         if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
           event.preventDefault();
           runCommand();
+        }
+      });
+
+      cwdToggleEl.addEventListener("click", () => {
+        if (cwdMenuOpen) {
+          setCwdMenuOpen(false);
+        } else {
+          openCwdMenu(true);
+          cwdEl.focus();
+        }
+      });
+
+      cwdEl.addEventListener("focus", () => {
+        openCwdMenu(false);
+      });
+
+      cwdEl.addEventListener("input", () => {
+        openCwdMenu(false);
+      });
+
+      cwdEl.addEventListener("keydown", (event) => {
+        const options = filteredRecentCwds();
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          if (!cwdMenuOpen) {
+            openCwdMenu(false);
+            return;
+          }
+          if (!options.length) return;
+          cwdHighlight = (cwdHighlight + 1) % options.length;
+          renderCwdMenu(options);
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          if (!cwdMenuOpen) {
+            openCwdMenu(false);
+            return;
+          }
+          if (!options.length) return;
+          cwdHighlight = (cwdHighlight - 1 + options.length) % options.length;
+          renderCwdMenu(options);
+          return;
+        }
+        if (event.key === "Enter" && cwdMenuOpen && cwdHighlight >= 0 && options[cwdHighlight]) {
+          event.preventDefault();
+          selectCwd(options[cwdHighlight]);
+          return;
+        }
+        if (event.key === "Escape") {
+          setCwdMenuOpen(false);
+        }
+      });
+
+      document.addEventListener("click", (event) => {
+        const combo = document.getElementById("cwd-combo");
+        if (!combo.contains(event.target)) {
+          setCwdMenuOpen(false);
         }
       });
 
@@ -923,6 +1178,7 @@
 
       renderGitCommands();
       loadHistory();
+      loadRecentCwds();
       commandEl.focus();
     </script>
   </body>

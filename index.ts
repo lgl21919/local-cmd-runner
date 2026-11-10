@@ -100,6 +100,8 @@ const HISTORY_DIR = resolveConfiguredDirectory(
   process.env.LOCAL_CMD_RUNNER_HISTORY_DIR,
   resolve(process.cwd(), "history"),
 );
+const RECENT_CWDS_FILE = join(HISTORY_DIR, "recent-cwds.json");
+const RECENT_CWDS_LIMIT = 10;
 
 function formatDateFolder(date = new Date()): string {
   const year = date.getFullYear();
@@ -140,6 +142,106 @@ function toListItem(entry: HistoryEntry): HistoryListItem {
   };
 }
 
+async function readRecentCwds(): Promise<string[]> {
+  try {
+    const raw = await readFile(RECENT_CWDS_FILE, "utf8");
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      .map((item) => item.trim());
+  } catch {
+    return [];
+  }
+}
+
+function normalizeCwdPath(cwd: string): string {
+  const trimmed = cwd.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  // Keep drive roots like "D:\", strip other trailing separators.
+  if (/^[a-zA-Z]:[\\/]$/.test(trimmed) || trimmed === "/" || trimmed === "\\") {
+    return trimmed.length === 1 ? trimmed : `${trimmed[0]}:\\`;
+  }
+
+  return trimmed.replace(/[\\/]+$/, "");
+}
+
+async function rememberCwd(cwd: string): Promise<string[]> {
+  const normalized = normalizeCwdPath(cwd);
+  if (!normalized) {
+    return readRecentCwds();
+  }
+
+  const existing = (await readRecentCwds()).map(normalizeCwdPath).filter(Boolean);
+  const next = [
+    normalized,
+    ...existing.filter(
+      (item) => item.toLowerCase() !== normalized.toLowerCase(),
+    ),
+  ].slice(0, RECENT_CWDS_LIMIT);
+
+  await mkdir(HISTORY_DIR, { recursive: true });
+  await writeFile(RECENT_CWDS_FILE, JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+
+async function listRecentCwds(): Promise<string[]> {
+  const storedRaw = await readRecentCwds();
+  const stored: string[] = [];
+  const seen = new Set<string>();
+  for (const item of storedRaw) {
+    const cwd = normalizeCwdPath(item);
+    const key = cwd.toLowerCase();
+    if (!cwd || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    stored.push(cwd);
+  }
+
+  if (stored.length >= RECENT_CWDS_LIMIT) {
+    return stored.slice(0, RECENT_CWDS_LIMIT);
+  }
+
+  // Backfill from history files if the dedicated list is still short.
+  const merged = [...stored];
+  const groups = await listHistory("");
+
+  for (const group of groups) {
+    for (const entry of group.entries) {
+      const cwd = normalizeCwdPath(entry.cwd ?? "");
+      if (!cwd) {
+        continue;
+      }
+      const key = cwd.toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(cwd);
+      if (merged.length >= RECENT_CWDS_LIMIT) {
+        break;
+      }
+    }
+    if (merged.length >= RECENT_CWDS_LIMIT) {
+      break;
+    }
+  }
+
+  const result = merged.slice(0, RECENT_CWDS_LIMIT);
+  if (JSON.stringify(result) !== JSON.stringify(storedRaw.slice(0, RECENT_CWDS_LIMIT))) {
+    await mkdir(HISTORY_DIR, { recursive: true });
+    await writeFile(RECENT_CWDS_FILE, JSON.stringify(result, null, 2), "utf8");
+  }
+
+  return result;
+}
+
 async function saveHistoryEntry(
   input: Omit<HistoryEntry, "id" | "date" | "executedAt"> & {
     executedAt?: string;
@@ -165,6 +267,7 @@ async function saveHistoryEntry(
   await mkdir(dayDir, { recursive: true });
   const filePath = join(dayDir, `${id}.json`);
   await writeFile(filePath, JSON.stringify(entry, null, 2), "utf8");
+  await rememberCwd(entry.cwd);
   return entry;
 }
 
@@ -516,6 +619,19 @@ async function main() {
     }
   });
 
+  app.get("/api/recent-cwds", async (_req, res) => {
+    try {
+      const cwds = await listRecentCwds();
+      res.json({
+        defaultCwd: DEFAULT_CWD,
+        cwds,
+      });
+    } catch (error) {
+      console.error("list recent cwds failed:", error);
+      res.status(500).json({ error: "failed to list recent directories" });
+    }
+  });
+
   app.get("/api/history/:date/:id", async (req, res) => {
     const entry = await readHistoryEntry(req.params.date, req.params.id);
     if (!entry) {
@@ -556,11 +672,13 @@ async function main() {
         exitCode: result.exitCode,
         durationMs: result.durationMs,
       });
+      const recentCwds = await listRecentCwds();
       res.json({
         command: body.command,
         cwd,
         ...result,
         history: toListItem(history),
+        recentCwds,
       });
     } catch (error) {
       console.error("command failed:", error);
